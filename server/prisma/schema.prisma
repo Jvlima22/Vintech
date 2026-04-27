@@ -1,0 +1,122 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Winery {
+  id         String   @id @default(uuid())
+  name       String
+  slug       String   @unique
+  logo_url   String?
+  plan_type  String   @default("basic")
+  created_at DateTime @default(now())
+
+  profiles   Profile[]
+  products   Product[]
+  events     Event[]
+  bookings   Booking[]
+  sales      Sale[]
+  team_members TeamMember[]
+
+  @@map("wineries")
+}
+
+model Profile {
+  id         String   @id
+  winery_id  String?
+  full_name  String?
+  role       String   @default("editor")
+  avatar_url String?
+  updated_at DateTime @updatedAt
+
+  winery     Winery?  @relation(fields: [winery_id], references: [id])
+
+  @@map("profiles")
+}
+
+model Product {
+  id             String   @id @default(uuid())
+  winery_id      String
+  name           String
+  variety        String?
+  vintage        String?
+  description    String?
+  price          Decimal  @db.Decimal(10, 2)
+  stock_quantity Int      @default(0)
+  image_url      String?
+  sku            String?
+  category       String   @default("vinho")
+  created_at     DateTime @default(now())
+
+  winery         Winery   @relation(fields: [winery_id], references: [id], onDelete: Cascade)
+
+  @@map("products")
+}
+
+model Event {
+  id           String   @id @default(uuid())
+  winery_id    String
+  title        String
+  description  String?
+  date         DateTime
+  capacity     Int
+  booked_slots Int      @default(0)
+  price        Decimal  @db.Decimal(10, 2)
+  status       String   @default("active")
+  created_at   DateTime @default(now())
+
+  winery       Winery   @relation(fields: [winery_id], references: [id], onDelete: Cascade)
+  bookings     Booking[]
+
+  @@map("events")
+}
+
+model Booking {
+  id             String   @id @default(uuid())
+  event_id       String
+  winery_id      String
+  customer_name  String
+  customer_email String
+  participants   Int      @default(1)
+  total_price    Decimal  @db.Decimal(10, 2)
+  status         String   @default("confirmed")
+  created_at     DateTime @default(now())
+
+  event          Event    @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  winery         Winery   @relation(fields: [winery_id], references: [id], onDelete: Cascade)
+
+  @@map("bookings")
+}
+
+model Sale {
+  id             String   @id @default(uuid())
+  winery_id      String
+  total_amount   Decimal  @db.Decimal(10, 2)
+  payment_method String?
+  status         String   @default("completed")
+  customer_name  String?
+  created_at     DateTime @default(now())
+
+  winery         Winery   @relation(fields: [winery_id], references: [id], onDelete: Cascade)
+
+  @@map("sales")
+}
+
+model TeamMember {
+  id         String   @id @default(uuid())
+  winery_id  String
+  name       String
+  email      String?
+  role       String?
+  phone      String?
+  status     String   @default("active")
+  created_at DateTime @default(now())
+
+  winery     Winery   @relation(fields: [winery_id], references: [id], onDelete: Cascade)
+
+  @@map("team_members")
+}
