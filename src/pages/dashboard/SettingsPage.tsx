@@ -36,7 +36,7 @@ export default function SettingsPage() {
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
   const { data: planData, isLoading: isLoadingPlan, refetch: refetchPlan } = usePlanLimits();
   
-  const [activeTab, setActiveTab] = useState(searchParams.get("success") ? "assinatura" : "geral");
+  const [activeTab, setActiveTab] = useState(searchParams.get("tab") || (searchParams.get("success") ? "assinatura" : "geral"));
   const [showSuccessModal, setShowSuccessModal] = useState(searchParams.get("success") === "true");
   
   // States para os formulários
@@ -132,6 +132,7 @@ export default function SettingsPage() {
         body: JSON.stringify({ 
           priceId: priceId,
           userId: profile.id,
+          wineryId: profile.winery_id,
           returnUrl: window.location.href.split('?')[0]
         }),
       });
@@ -459,13 +460,16 @@ export default function SettingsPage() {
               <div className="relative z-10">
                 <p className="text-gold text-xs font-bold tracking-[0.2em] uppercase mb-1">Status da Conta</p>
                 <h2 className="font-display text-3xl font-bold">
-                  Plano: {isLoadingPlan ? "Carregando..." : planData?.limits.name}
+                  {isLoadingPlan ? "Carregando..." : planData?.limits.name}
                 </h2>
-                <p className="opacity-80 text-sm mt-2">Próxima renovação em {
-                  planData?.limits?.expiresAt 
-                    ? new Date(planData.limits.expiresAt).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })
-                    : new Date(new Date().setMonth(new Date().getMonth() + 1)).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })
-                }.</p>
+                <p className="opacity-80 text-sm mt-2">
+                  {planData?.limits.isTrial ? "Expira em " : "Próxima renovação em "}
+                  {
+                    planData?.limits?.expiresAt 
+                      ? new Date(planData.limits.expiresAt).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })
+                      : new Date(new Date().setMonth(new Date().getMonth() + 1)).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })
+                  }.
+                </p>
               </div>
             </div>
             
@@ -546,7 +550,7 @@ export default function SettingsPage() {
                     <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-primary"></div> 500 pedidos/mês</li>
                     <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-primary"></div> Acesso a tudo</li>
                   </ul>
-                  {planData?.limits.name === "Viticultura" ? (
+                  {(!planData?.limits.isTrial && planData?.limits.name === "Viticultura") ? (
                     <Button variant="outline" className="w-full" disabled>Seu Plano Atual</Button>
                   ) : (
                     <Button
@@ -576,7 +580,7 @@ export default function SettingsPage() {
                     <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-gold"></div> 1.000 pedidos/mês</li>
                     <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-gold"></div> Clube de Assinatura</li>
                   </ul>
-                  {planData?.limits.name === "Business" ? (
+                  {(!planData?.limits.isTrial && planData?.limits.name === "Business") ? (
                     <Button variant="outline" className="w-full bg-white/10 text-white border-white/20 hover:bg-white/20" disabled>Seu Plano Atual</Button>
                   ) : (
                     <Button
@@ -602,7 +606,7 @@ export default function SettingsPage() {
                     <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-primary/50"></div> Pedidos ilimitados</li>
                     <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-primary/50"></div> API customizada</li>
                   </ul>
-                  {planData?.limits.name === "Sommelier" ? (
+                  {(!planData?.limits.isTrial && planData?.limits.name === "Sommelier") ? (
                     <Button variant="outline" className="w-full" disabled>Seu Plano Atual</Button>
                   ) : (
                     <Button

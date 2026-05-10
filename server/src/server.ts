@@ -1,23 +1,22 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { PrismaClient } from '@prisma/client';
 import { createWinery } from './controllers/auth.controller';
 import Stripe from 'stripe';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from './lib/supabase';
 
 dotenv.config();
 
 const app = express();
-const prisma = new PrismaClient();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 const port = process.env.PORT || 3001;
 
-// Supabase com Service Role Key para o backend ter poderes de admin (bypass RLS)
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL || "",
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || ""
-);
+// Mapeamento de IDs de Preço para Nomes de Plano (Sincronizado com o Front)
+const PRICE_TO_PLAN: Record<string, string> = {
+  [process.env.STRIPE_PRICE_VINHEDO || ""]: "Viticultura",
+  [process.env.STRIPE_PRICE_RESERVA || ""]: "Business",
+  [process.env.STRIPE_PRICE_GRAND_CRU || ""]: "Sommelier",
+};
 
 app.use(cors());
 // Webhook Route (MUST use express.raw for Stripe signature verification)
@@ -28,49 +27,63 @@ app.post('/api/webhook/stripe', express.raw({ type: 'application/json' }), async
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET!);
   } catch (err: any) {
-    console.error(`⚠️ Webhook signature verification failed: ${err.message}`);
+    console.error(`❌ Erro no Webhook: ${err.message}`);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
+  // Lógica para lidar com os eventos do Stripe
   try {
+    if (event.type === 'checkout.session.completed' || event.type === 'customer.subscription.updated') {
+    const session = event.data.object as any;
+    const customerId = session.customer;
+    const subscriptionId = session.subscription;
+    
+    // Pegar o ID do Preço (Price ID)
+    let priceId = "";
     if (event.type === 'checkout.session.completed') {
-      const session = event.data.object as Stripe.Checkout.Session;
-      const userId = session.client_reference_id; // Passado na criação
-      const subscriptionId = session.subscription as string;
-      const customerId = session.customer as string;
-      
-      // Expandir a sessão para ver os itens de linha (plano)
       const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
-      const priceId = lineItems.data[0]?.price?.id;
+      priceId = lineItems.data[0]?.price?.id || "";
+    } else {
+      priceId = session.items.data[0].price.id;
+    }
 
-      if (userId && priceId) {
-        // Encontra a vinícola do usuário no Supabase
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('winery_id')
-          .eq('id', userId)
-          .single();
+    // Identificar a vinícola (Tentar Session Metadata -> Subscription Metadata -> Customer Metadata)
+    let wineryId = session.metadata?.wineryId;
+    
+    if (!wineryId && session.subscription) {
+      const sub = await stripe.subscriptions.retrieve(session.subscription as string);
+      wineryId = sub.metadata?.wineryId;
+    }
 
-        if (profile?.winery_id) {
-          // Atualiza a vinícola usando Supabase
-          const { error } = await supabase
-            .from('wineries')
-            .update({
-              stripe_price_id: priceId,
-              stripe_customer_id: customerId,
-              stripe_subscription_id: subscriptionId,
-              plan_type: 'premium'
-            })
-            .eq('id', profile.winery_id);
-            
-          if (error) {
-            console.error("Erro ao atualizar via Webhook:", error);
-          } else {
-            console.log(`✅ Plano atualizado com sucesso para a vinícola ${profile.winery_id} via Supabase Webhook (Price ID: ${priceId})`);
-          }
-        }
+    if (!wineryId) {
+      const customer = await stripe.customers.retrieve(customerId) as any;
+      wineryId = customer.metadata?.wineryId;
+    }
+
+    const planName = PRICE_TO_PLAN[priceId] || "Viticultura";
+    console.log(`🔍 Webhook Debug: wineryId=${wineryId}, priceId=${priceId}, planName=${planName}`);
+
+    if (wineryId) {
+      console.log(`🚀 Atualizando plano para a vinícola ${wineryId} (Plano: ${planName})`);
+      
+      const { error } = await supabase
+        .from('wineries')
+        .update({
+          stripe_customer_id: customerId,
+          stripe_subscription_id: subscriptionId,
+          stripe_price_id: priceId,
+          plan_type: 'premium',
+          plan_name: planName // Salvando o nome por extenso!
+        })
+        .eq('id', wineryId);
+
+      if (error) {
+        console.error('❌ Erro ao atualizar Supabase:', error.message);
+      } else {
+        console.log(`✅ Plano ${planName} atualizado com sucesso via Supabase Webhook`);
       }
     }
+  }
     
     // Processar cancelamentos
     if (event.type === 'customer.subscription.deleted') {
@@ -116,13 +129,14 @@ app.post('/auth/create-winery', createWinery);
 
 // Stripe Checkout Route
 app.post('/api/checkout/create-session', async (req: any, res: any) => {
-  const { priceId, userId, returnUrl } = req.body;
+  const { priceId, userId, wineryId, returnUrl } = req.body;
   
   if (!priceId) {
     return res.status(400).json({ error: 'priceId is required' });
   }
 
   try {
+    console.log(`🛒 Criando sessão para Winery: ${wineryId}, User: ${userId}`);
     const successUrl = returnUrl ? `${returnUrl}?session_id={CHECKOUT_SESSION_ID}&success=true` : process.env.STRIPE_SUCCESS_URL!;
     const cancelUrl = returnUrl || process.env.STRIPE_CANCEL_URL!;
 
@@ -136,9 +150,16 @@ app.post('/api/checkout/create-session', async (req: any, res: any) => {
       mode: 'subscription',
       success_url: successUrl,
       cancel_url: cancelUrl,
-      client_reference_id: userId, // Vincula a assinatura ao usuário logado
+      client_reference_id: userId,
       metadata: {
-        userId: userId || null
+        userId: userId || null,
+        wineryId: wineryId || null
+      },
+      subscription_data: {
+        metadata: {
+          wineryId: wineryId || null,
+          userId: userId || null
+        }
       }
     });
 

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
-import { startOfMonth, endOfMonth, addMonths } from "date-fns";
+import { startOfMonth, endOfMonth, addMonths, differenceInDays, addDays } from "date-fns";
 
 export interface PlanLimits {
   name: string;
@@ -9,6 +9,8 @@ export interface PlanLimits {
   maxOrders: number;
   priceId: string;
   expiresAt?: string | null;
+  isTrial?: boolean;
+  trialDaysLeft?: number;
 }
 
 export const PLAN_CONFIGS: Record<string, PlanLimits> = {
@@ -32,7 +34,6 @@ export const PLAN_CONFIGS: Record<string, PlanLimits> = {
   },
 };
 
-// Mapa reverso: stripe_price_id -> nome do plano
 const PRICE_TO_PLAN: Record<string, string> = {
   [import.meta.env.VITE_STRIPE_PRICE_VINHEDO || "viticultura"]: "Viticultura",
   [import.meta.env.VITE_STRIPE_PRICE_RESERVA || "business"]: "Business",
@@ -53,7 +54,7 @@ export function usePlanLimits() {
       // 1. Buscar os DADOS REAIS da vinícola
       const { data: winery, error: wineryError } = await supabase
         .from("wineries")
-        .select("stripe_price_id, plan_type")
+        .select("stripe_price_id, plan_type, trial_started_at, created_at, plan_name")
         .eq("id", profile.winery_id)
         .single();
 
@@ -61,22 +62,37 @@ export function usePlanLimits() {
         console.error("[usePlanLimits] Erro ao buscar vinícola:", wineryError.message);
       }
 
-      console.log("[usePlanLimits] winery_id:", profile.winery_id);
-      console.log("[usePlanLimits] winery data:", winery);
-
-      // Mapeia o stripe_price_id para o nome do plano
       const priceId = winery?.stripe_price_id;
-      const currentPlanName = (priceId && PRICE_TO_PLAN[priceId]) ? PRICE_TO_PLAN[priceId] : "Viticultura";
+      const isPaidPlan = !!priceId && priceId !== "viticultura";
+      
+      // Lógica de Trial
+      const trialStart = new Date(winery?.trial_started_at || winery?.created_at || new Date());
+      const trialEnd = addDays(trialStart, 15);
+      const daysLeft = differenceInDays(trialEnd, new Date());
+      const isTrialActive = !isPaidPlan && daysLeft > 0;
 
-      console.log("[usePlanLimits] priceId:", priceId, "-> planName:", currentPlanName);
+      // Determinar o nome do plano (Prioridade para o que está no banco)
+      let currentPlanName = winery?.plan_name || "Viticultura";
+      let displayName = currentPlanName;
+      
+      if (isPaidPlan) {
+        currentPlanName = winery?.plan_name || PRICE_TO_PLAN[priceId] || "Viticultura";
+        displayName = currentPlanName;
+      } else if (isTrialActive) {
+        currentPlanName = "Business"; // Limites do Business
+        displayName = "Período de Teste";
+      }
 
       const config = PLAN_CONFIGS[currentPlanName] || DEFAULT_PLAN;
       
       const limits: PlanLimits = {
         ...config,
-        expiresAt: (winery?.plan_type === "premium" || currentPlanName !== "Viticultura")
+        name: displayName, // Usamos o nome de exibição aqui
+        isTrial: isTrialActive,
+        trialDaysLeft: isTrialActive ? daysLeft : 0,
+        expiresAt: isPaidPlan 
           ? addMonths(new Date(), 1).toISOString()
-          : null,
+          : (isTrialActive ? trialEnd.toISOString() : null)
       };
 
       // 2. Contar membros da equipe
