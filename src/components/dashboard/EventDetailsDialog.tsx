@@ -69,7 +69,7 @@ export function EventDetailsDialog({
       if (error) throw error;
 
       // 2. Disparar mensagens via Backend (Invisível)
-      await fetch("http://localhost:3001/api/whatsapp/send-bulk-feedback", {
+      await fetch(`${import.meta.env.VITE_API_URL}/api/whatsapp/send-bulk-feedback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

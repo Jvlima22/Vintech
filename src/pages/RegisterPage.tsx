@@ -44,7 +44,7 @@ export const RegisterPage = () => {
     setLoading(true);
     try {
       // 1. Criar a Vinícola no Backend PRIMEIRO
-      const wineryResponse = await fetch('http://localhost:3001/auth/create-winery', {
+      const wineryResponse = await fetch(`${import.meta.env.VITE_API_URL}/auth/create-winery`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wineryName: form.winery || `${form.name}'s Winery` }),
