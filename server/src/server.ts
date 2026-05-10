@@ -87,7 +87,7 @@ app.post('/api/webhook/stripe', express.raw({ type: 'application/json' }), async
     
     // Processar cancelamentos
     if (event.type === 'customer.subscription.deleted') {
-      const subscription = event.data.object as Stripe.Subscription;
+      const subscription = event.data.object as any; // Cast to any to avoid Stripe namespace issues during build
       
       const { data: wineries } = await supabase
         .from('wineries')
@@ -257,9 +257,12 @@ app.get('/products', async (req, res) => {
   }
 
   try {
-    const products = await prisma.product.findMany({
-      where: { winery_id: wineryId as string }
-    });
+    const { data: products, error } = await supabase
+      .from('products')
+      .select('*')
+      .eq('winery_id', wineryId as string);
+
+    if (error) throw error;
     res.json(products);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch products' });
