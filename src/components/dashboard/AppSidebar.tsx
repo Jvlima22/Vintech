@@ -1,7 +1,7 @@
 import { LayoutDashboard, Wine, MapPin, ShoppingCart, Users, BarChart3, Settings, LogOut } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, Link } from "react-router-dom";
 import {
   Sidebar,
   SidebarContent,
@@ -87,8 +87,14 @@ export function AppSidebar() {
       </SidebarContent>
 
       {profile && (
-        <div className={cn("mt-2 flex items-center py-2", collapsed ? "justify-center px-0" : "gap-3 px-3")}>
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-bold text-primary overflow-hidden">
+        <Link 
+          to="/dashboard/perfil"
+          className={cn(
+            "mt-2 flex items-center py-2 transition-all hover:bg-sidebar-accent group",
+            collapsed ? "justify-center px-0" : "gap-3 px-3"
+          )}
+        >
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-bold text-primary overflow-hidden border border-gold/10 group-hover:scale-105 transition-transform">
             {profile.avatar_url ? (
               <img src={profile.avatar_url} alt={profile.full_name || ""} className="h-full w-full object-cover" />
             ) : (
@@ -97,13 +103,18 @@ export function AppSidebar() {
           </div>
           {!collapsed && (
             <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-medium text-sidebar-foreground">{profile.full_name}</p>
+              <p className="truncate text-[10px] font-bold text-sidebar-foreground tracking-tight group-hover:text-gold transition-colors">
+                {(() => {
+                  const parts = (profile.full_name || "").trim().split(/\s+/);
+                  return parts.length > 2 ? `${parts[0]} ${parts[1]}` : profile.full_name;
+                })()}
+              </p>
               <p className="truncate text-[10px] text-sidebar-foreground/50">
                 {profile.role === "admin" ? "Administrador" : "Equipe"}
               </p>
             </div>
           )}
-        </div>
+        </Link>
       )}
 
       <SidebarFooter className="border-t border-sidebar-border bg-sidebar p-2">

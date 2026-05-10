@@ -5,7 +5,7 @@ export const SiteFooter = () => {
   return (
     <footer id="contato" className="border-t border-sidebar-border bg-sidebar text-sidebar-foreground">
       <div className="container py-16">
-        <div className="grid gap-12 md:grid-cols-4">
+        <div className="grid gap-12 md:grid-cols-5">
           <div className="md:col-span-2">
             <Logo variant="light" />
             <p className="mt-6 max-w-sm text-sm leading-relaxed text-sidebar-foreground/65">
@@ -30,9 +30,19 @@ export const SiteFooter = () => {
               Contato
             </h4>
             <ul className="mt-4 space-y-2.5 text-sm">
-              <li className="text-sidebar-foreground/70">contato@vintech.com.br</li>
-              <li className="text-sidebar-foreground/70">+55 54 99999-0000</li>
-              <li className="text-sidebar-foreground/70">Bento Gonçalves, RS</li>
+              <li className="text-sidebar-foreground/70">contato.vintech@gmail.com</li>
+              <li className="text-sidebar-foreground/70">+55 (11) 97567-8074</li>
+              <li className="text-sidebar-foreground/70">São Paulo, SP</li>
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="font-display text-sm font-semibold uppercase tracking-wider text-gold">
+              Institucional
+            </h4>
+            <ul className="mt-4 space-y-2.5 text-sm">
+              <li><Link to="/terms" className="text-sidebar-foreground/70 hover:text-gold transition-colors">Termos de Uso</Link></li>
+              <li><Link to="/privacy" className="text-sidebar-foreground/70 hover:text-gold transition-colors">Política de Privacidade</Link></li>
             </ul>
           </div>
         </div>

@@ -10,7 +10,9 @@ import {
   MapPin, 
   Wifi, 
   ShieldCheck,
-  Loader2
+  Loader2,
+  CreditCard,
+  Zap
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -21,11 +23,21 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useSearchParams } from "react-router-dom";
+import { addMonths } from "date-fns";
+
+import { usePlanLimits } from "@/hooks/usePlanLimits";
 
 export default function SettingsPage() {
   const { profile, refreshProfile } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
+  const { data: planData, isLoading: isLoadingPlan, refetch: refetchPlan } = usePlanLimits();
+  
+  const [activeTab, setActiveTab] = useState(searchParams.get("success") ? "assinatura" : "geral");
+  const [showSuccessModal, setShowSuccessModal] = useState(searchParams.get("success") === "true");
   
   // States para os formulários
   const [wineryData, setWineryData] = useState<any>({
@@ -54,6 +66,90 @@ export default function SettingsPage() {
       fetchSettings();
     }
   }, [profile]);
+
+  const sessionId = searchParams.get("session_id");
+
+  // Se o modal de sucesso foi acionado e temos um session_id, verificamos com o servidor
+  useEffect(() => {
+    if (showSuccessModal && sessionId && profile?.winery_id) {
+      const verifySession = async () => {
+        try {
+          const res = await fetch(`${import.meta.env.VITE_API_URL}/api/checkout/verify-session`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sessionId })
+          });
+          
+          const data = await res.json();
+          
+          if (data.success) {
+            // O Front-end agora é responsável por salvar as informações garantidamente no Supabase
+            const { error } = await supabase
+              .from('wineries')
+              .update({
+                stripe_price_id: data.priceId,
+                stripe_subscription_id: data.subscriptionId,
+                stripe_customer_id: data.customerId,
+                plan_type: 'premium'
+              })
+              .eq('id', profile.winery_id);
+              
+            if (error) {
+              console.error("Erro ao salvar o plano no banco:", error);
+            } else {
+              console.log("Plano salvo com sucesso no Supabase.");
+            }
+          }
+          
+          // Assim que salvo, recarregamos o estado local
+          await refetchPlan();
+        } catch (error) {
+          console.error("Erro ao verificar sessão:", error);
+        }
+      };
+      
+      verifySession();
+    } else if (showSuccessModal) {
+      refetchPlan();
+    }
+  }, [showSuccessModal, sessionId, refetchPlan, profile?.winery_id]);
+
+  const closeSuccessModal = () => {
+    setShowSuccessModal(false);
+    searchParams.delete("success");
+    searchParams.delete("session_id");
+    setSearchParams(searchParams);
+  };
+
+  const handleCheckout = async (priceId: string, planName: string) => {
+    if (!profile?.id) return;
+    
+    setLoadingPlan(planName);
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/checkout/create-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          priceId: priceId,
+          userId: profile.id,
+          returnUrl: window.location.href.split('?')[0]
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error(data.error || "Erro ao criar sessão");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Erro ao processar pagamento");
+      console.error(error);
+    } finally {
+      setLoadingPlan(null);
+    }
+  };
 
   const fetchSettings = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -139,13 +235,15 @@ export default function SettingsPage() {
           <h1 className="mt-2 font-display text-3xl font-bold tracking-tight md:text-4xl">Configurações</h1>
           <p className="mt-1 text-muted-foreground">Gerencie os dados da sua vinícola e integrações.</p>
         </div>
-        <Button onClick={handleSave} disabled={saving} className="bg-wine hover:bg-wine/90">
-          {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-          Salvar Alterações
-        </Button>
+        {activeTab !== "assinatura" && (
+          <Button onClick={handleSave} disabled={saving} className="bg-wine hover:bg-wine/90">
+            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            Salvar Alterações
+          </Button>
+        )}
       </div>
 
-      <Tabs defaultValue="geral" className="space-y-6">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="bg-secondary/50 p-1 border border-border/50">
           <TabsTrigger value="geral" className="gap-2">
             <Building2 className="h-4 w-4" /> Geral
@@ -156,9 +254,13 @@ export default function SettingsPage() {
           <TabsTrigger value="templates" className="gap-2">
             <MessageSquare className="h-4 w-4" /> Mensagens
           </TabsTrigger>
-          <TabsTrigger value="conta" className="gap-2">
+               <TabsTrigger value="conta" className="gap-2">
             <User className="h-4 w-4" /> Minha Conta
           </TabsTrigger>
+          <TabsTrigger value="assinatura" className="gap-2">
+            <CreditCard className="h-4 w-4" /> Assinatura
+          </TabsTrigger>
+     
         </TabsList>
 
         {/* --- ABA GERAL --- */}
@@ -347,6 +449,180 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
 
+        {/* --- ABA ASSINATURA E PLANOS --- */}
+        <TabsContent value="assinatura" className="space-y-6">
+          <Card className="border-border/50 shadow-sm overflow-hidden">
+            <div className="bg-wine p-6 text-primary-foreground relative overflow-hidden">
+              <div className="absolute top-0 right-0 opacity-10 transform translate-x-1/3 -translate-y-1/3">
+                <ShieldCheck className="w-48 h-48" />
+              </div>
+              <div className="relative z-10">
+                <p className="text-gold text-xs font-bold tracking-[0.2em] uppercase mb-1">Status da Conta</p>
+                <h2 className="font-display text-3xl font-bold">
+                  Plano: {isLoadingPlan ? "Carregando..." : planData?.limits.name}
+                </h2>
+                <p className="opacity-80 text-sm mt-2">Próxima renovação em {
+                  planData?.limits?.expiresAt 
+                    ? new Date(planData.limits.expiresAt).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })
+                    : new Date(new Date().setMonth(new Date().getMonth() + 1)).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })
+                }.</p>
+              </div>
+            </div>
+            
+            <CardContent className="p-6">
+              <h3 className="font-semibold mb-6 text-lg flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-primary" />
+                Seu consumo este mês
+              </h3>
+              
+              {isLoadingPlan ? (
+                <div className="flex items-center justify-center py-6">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                </div>
+              ) : (
+                <div className="grid md:grid-cols-2 gap-8">
+                  {/* Barra de Pedidos */}
+                  <div className="bg-muted/30 p-4 rounded-xl border border-border/50">
+                    <div className="flex justify-between text-sm mb-3">
+                      <span className="font-medium text-foreground">Pedidos Registrados</span>
+                      <span className="text-muted-foreground font-mono">
+                        {planData?.usage.ordersThisMonth} / {planData?.limits.maxOrders === 999999 ? "∞" : planData?.limits.maxOrders}
+                        <span className="text-[10px] uppercase ml-1">
+                          ({planData?.limits.maxOrders === 999999 ? "0" : Math.round(((planData?.usage.ordersThisMonth || 0) / (planData?.limits.maxOrders || 1)) * 100)}%)
+                        </span>
+                      </span>
+                    </div>
+                    <div className="h-2.5 w-full bg-secondary rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-primary rounded-full transition-all duration-1000" 
+                        style={{ width: `${planData?.limits.maxOrders === 999999 ? 0 : Math.min(100, ((planData?.usage.ordersThisMonth || 0) / (planData?.limits.maxOrders || 1)) * 100)}%` }}
+                      ></div>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-3">
+                      Sua capacidade é de {planData?.limits.maxOrders === 999999 ? "pedidos ilimitados" : `${planData?.limits.maxOrders} pedidos por mês`}.
+                    </p>
+                  </div>
+
+                  {/* Barra de Equipe */}
+                  <div className="bg-muted/30 p-4 rounded-xl border border-border/50">
+                    <div className="flex justify-between text-sm mb-3">
+                      <span className="font-medium text-foreground">Membros da Equipe</span>
+                      <span className="text-muted-foreground font-mono">
+                        {planData?.usage.teamMembers} / {planData?.limits.maxUsers === 999999 ? "∞" : planData?.limits.maxUsers}
+                        <span className="text-[10px] uppercase ml-1">
+                          ({planData?.limits.maxUsers === 999999 ? "0" : Math.round(((planData?.usage.teamMembers || 0) / (planData?.limits.maxUsers || 1)) * 100)}%)
+                        </span>
+                      </span>
+                    </div>
+                    <div className="h-2.5 w-full bg-secondary rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gold rounded-full transition-all duration-1000" 
+                        style={{ width: `${planData?.limits.maxUsers === 999999 ? 0 : Math.min(100, ((planData?.usage.teamMembers || 0) / (planData?.limits.maxUsers || 1)) * 100)}%` }}
+                      ></div>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-3">
+                      Você tem {planData?.limits.maxUsers === 999999 ? "vagas ilimitadas" : `mais ${(planData?.limits.maxUsers || 0) - (planData?.usage.teamMembers || 0)} vagas`} para equipe neste plano.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <div className="mt-10">
+            <h3 className="font-display text-2xl font-bold mb-1">Evolua sua Vinícola</h3>
+            <p className="text-sm text-muted-foreground mb-6">Desbloqueie limites maiores e ferramentas premium para escalar suas vendas.</p>
+            
+            <div className="grid md:grid-cols-3 gap-6">
+              
+              {/* Viticultura */}
+              <Card className={`border-border bg-background transition-colors ${planData?.limits.name === "Viticultura" ? "opacity-60 grayscale-[50%]" : ""}`}>
+                <CardContent className="p-6">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Básico</div>
+                  <h4 className="font-display text-xl font-bold">Viticultura</h4>
+                  <div className="my-4 text-3xl font-bold">R$ 129<span className="text-sm text-muted-foreground font-normal">/mês</span></div>
+                  <ul className="text-sm space-y-2 text-muted-foreground mb-8">
+                    <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-primary"></div> Até 3 membros</li>
+                    <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-primary"></div> 500 pedidos/mês</li>
+                    <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-primary"></div> Acesso a tudo</li>
+                  </ul>
+                  {planData?.limits.name === "Viticultura" ? (
+                    <Button variant="outline" className="w-full" disabled>Seu Plano Atual</Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => handleCheckout(import.meta.env.VITE_STRIPE_PRICE_VINHEDO, "Viticultura")}
+                      disabled={loadingPlan === "Viticultura"}
+                    >
+                      {loadingPlan === "Viticultura" && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                      Contratar Plano
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Business */}
+              <Card className={`border-gold bg-wine text-white shadow-elegant relative overflow-hidden transform md:-translate-y-2 transition-transform ${planData?.limits.name === "Business" ? "" : "hover:scale-[1.02]"}`}>
+                <div className="absolute top-0 right-0 bg-gold text-wine text-[10px] font-bold uppercase px-3 py-1 rounded-bl-lg">
+                  Mais Escolhido
+                </div>
+                <CardContent className="p-6">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-gold mb-2">Popular</div>
+                  <h4 className="font-display text-xl font-bold text-gold">Business</h4>
+                  <div className="my-4 text-3xl font-bold text-white">R$ 349<span className="text-sm text-white/60 font-normal">/mês</span></div>
+                  <ul className="text-sm space-y-2 text-white/85 mb-8">
+                    <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-gold"></div> Até 7 membros</li>
+                    <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-gold"></div> 1.000 pedidos/mês</li>
+                    <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-gold"></div> Clube de Assinatura</li>
+                  </ul>
+                  {planData?.limits.name === "Business" ? (
+                    <Button variant="outline" className="w-full bg-white/10 text-white border-white/20 hover:bg-white/20" disabled>Seu Plano Atual</Button>
+                  ) : (
+                    <Button
+                      className="w-full bg-gold text-wine hover:bg-gold/90 font-bold shadow-lg"
+                      onClick={() => handleCheckout(import.meta.env.VITE_STRIPE_PRICE_RESERVA, "Business")}
+                      disabled={loadingPlan === "Business"}
+                    >
+                      {loadingPlan === "Business" ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}
+                      Contratar Plano
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Sommelier */}
+              <Card className={`border-border bg-card transition-colors ${planData?.limits.name === "Sommelier" ? "" : "hover:border-primary/30"}`}>
+                <CardContent className="p-6">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Premium</div>
+                  <h4 className="font-display text-xl font-bold">Sommelier</h4>
+                  <div className="my-4 text-3xl font-bold">R$ 849<span className="text-sm text-muted-foreground font-normal">/mês</span></div>
+                  <ul className="text-sm space-y-2 text-foreground/80 mb-8">
+                    <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-primary/50"></div> Equipe ilimitada</li>
+                    <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-primary/50"></div> Pedidos ilimitados</li>
+                    <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-primary/50"></div> API customizada</li>
+                  </ul>
+                  {planData?.limits.name === "Sommelier" ? (
+                    <Button variant="outline" className="w-full" disabled>Seu Plano Atual</Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      className="w-full hover:bg-primary/5 hover:text-primary border-primary/20"
+                      onClick={() => handleCheckout(import.meta.env.VITE_STRIPE_PRICE_GRAND_CRU, "Sommelier")}
+                      disabled={loadingPlan === "Sommelier"}
+                    >
+                      {loadingPlan === "Sommelier" && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                      Contratar Plano
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+
+            </div>
+          </div>
+
+        </TabsContent>
+
         {/* --- ABA CONTA --- */}
         <TabsContent value="conta" className="space-y-4">
           <Card className="border-border/50 shadow-sm">
@@ -384,6 +660,24 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* MODAL DE SUCESSO (OVERLAY) */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-card border border-border shadow-2xl rounded-2xl p-8 max-w-md w-full relative animate-in zoom-in-95 duration-300">
+            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
+              <ShieldCheck className="w-8 h-8 text-green-600" />
+            </div>
+            <h2 className="text-2xl font-display font-bold text-center mb-2 text-foreground">Pagamento Confirmado!</h2>
+            <p className="text-center text-muted-foreground mb-8">
+              Parabéns! Seu novo plano Vintech foi ativado com sucesso. Os novos limites já estão desbloqueados na sua conta.
+            </p>
+            <Button onClick={closeSuccessModal} className="w-full bg-gold text-wine hover:bg-gold/90 font-bold py-6 text-lg">
+              Acessar sistema
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

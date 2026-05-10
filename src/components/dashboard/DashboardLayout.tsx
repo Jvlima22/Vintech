@@ -1,4 +1,4 @@
-import { Outlet, Link } from "react-router-dom";
+import { Outlet, Link, useNavigate } from "react-router-dom";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
 import { Bell, Search } from "lucide-react";
@@ -9,6 +9,7 @@ import { NotificationDropdown } from "@/components/dashboard/NotificationDropdow
 
 export const DashboardLayout = () => {
   const { profile } = useAuth();
+  const navigate = useNavigate();
 
   return (
     <SidebarProvider defaultOpen>
@@ -24,9 +25,12 @@ export const DashboardLayout = () => {
             </div>
 
             <div className="ml-auto flex items-center gap-2">
-              <Link to="/" className="ml-2 hidden text-xs text-muted-foreground hover:text-primary md:inline">
+              <button 
+                onClick={() => navigate("/")}
+                className="ml-2 hidden text-xs text-muted-foreground hover:text-primary md:inline cursor-pointer bg-transparent border-none"
+              >
                 ← Voltar ao site
-              </Link>
+              </button>
               <NotificationDropdown />
               
               {profile && (
@@ -34,7 +38,7 @@ export const DashboardLayout = () => {
                   to="/dashboard/perfil" 
                   className="ml-2 flex items-center gap-2.5 rounded-full border border-border bg-card pl-1 pr-3 py-1 transition-all hover:bg-secondary/50 hover:border-gold/30 group"
                 >
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-wine text-[10px] font-semibold text-gold transition-transform group-hover:scale-105 overflow-hidden border border-gold/10">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-wine text-[10px] font-semibold text-gold group-hover:scale-105 overflow-hidden border border-gold/10">
                     {profile.avatar_url ? (
                       <img src={profile.avatar_url} alt={profile.full_name || ""} className="h-full w-full object-cover" />
                     ) : (
@@ -42,8 +46,13 @@ export const DashboardLayout = () => {
                     )}
                   </div>
                   <div className="hidden text-left sm:block">
-                    <div className="text-xs font-semibold leading-tight group-hover:text-gold transition-colors">{profile.full_name}</div>
-                    <div className="text-[10px] text-muted-foreground leading-tight">
+                    <div className="text-[10px] font-bold leading-tight group-hover:text-gold transition-colors tracking-tight">
+                      {(() => {
+                        const parts = (profile.full_name || "").trim().split(/\s+/);
+                        return parts.length > 2 ? `${parts[0]} ${parts[1]}` : profile.full_name;
+                      })()}
+                    </div>
+                    <div className="text-[9px] text-muted-foreground leading-tight">
                       {profile.role === 'admin' ? 'Administrador' : 'Equipe'} 
                       {profile.winery?.name ? ` · ${profile.winery.name}` : ''}
                     </div>

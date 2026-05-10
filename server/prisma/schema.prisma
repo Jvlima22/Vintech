@@ -8,12 +8,19 @@ datasource db {
 }
 
 model Winery {
-  id         String   @id @default(uuid())
-  name       String
-  slug       String   @unique
-  logo_url   String?
-  plan_type  String   @default("basic")
-  created_at DateTime @default(now())
+  id                     String    @id @default(uuid())
+  name                   String
+  slug                   String    @unique
+  logo_url               String?
+  plan_type              String    @default("basic")
+  plan_name              String?   @default("Viticultura")
+  plan_price             Decimal?  @db.Decimal(10, 2)
+  plan_start_date        DateTime?
+  plan_expires_at        DateTime?
+  stripe_price_id        String?
+  stripe_customer_id     String?
+  stripe_subscription_id String?
+  created_at             DateTime  @default(now())
 
   profiles   Profile[]
   products   Product[]

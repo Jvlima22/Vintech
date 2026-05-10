@@ -101,17 +101,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signOut = async () => {
-    // Marca logout explícito ANTES de chamar signOut
+    // 1. Marca logout explícito
     sessionStorage.setItem(LOGOUT_FLAG_KEY, '1');
     sessionStorage.removeItem(SESSION_FLAG_KEY);
     localStorage.removeItem(PROFILE_CACHE_KEY);
-    await supabase.auth.signOut();
+    
+    // 2. Atualização otimista (instantânea) da interface
+    setSession(null);
+    setUser(null);
+    setProfile(null);
+
+    // 3. Desloga no backend silenciosamente em background (sem await)
+    supabase.auth.signOut().catch(console.error);
   };
 
   const signInWithGoogle = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: window.location.origin + '/dashboard' },
+      options: { redirectTo: window.location.origin + '/' },
     });
     if (error) throw error;
   };

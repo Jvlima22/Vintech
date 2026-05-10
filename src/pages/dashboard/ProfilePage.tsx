@@ -133,8 +133,14 @@ export function ProfilePage() {
               />
             </div>
             <div>
-              <CardTitle className="text-2xl">{profile?.full_name || "Usuário"}</CardTitle>
-              <CardDescription className="text-base">{user?.email}</CardDescription>
+              <CardTitle className="text-2xl">
+                {(() => {
+                  const name = profile?.full_name || "Usuário";
+                  const parts = name.trim().split(/\s+/);
+                  return parts.length > 2 ? `${parts[0]} ${parts[1]}` : name;
+                })()}
+              </CardTitle>
+              <CardDescription className="text-base">{profile?.email || user?.email}</CardDescription>
             </div>
           </div>
         </CardHeader>
@@ -160,7 +166,7 @@ export function ProfilePage() {
                     <Mail className="h-4 w-4" /> E-mail
                   </Label>
                   <Input
-                    value={user?.email || ""}
+                    value={profile?.email || user?.email || ""}
                     disabled
                     className="bg-muted/50 border-border/50 cursor-not-allowed opacity-70"
                   />

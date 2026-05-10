@@ -35,7 +35,7 @@ export const LoginPage = () => {
         password: form.password,
       });
       if (error) throw error;
-      navigate("/dashboard");
+      navigate("/");
     } catch (error: any) {
       toast.error("Erro ao entrar: " + error.message);
     } finally {

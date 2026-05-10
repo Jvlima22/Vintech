@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { format, startOfMonth, endOfMonth, subMonths, isWithinInterval, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useQuery } from "@tanstack/react-query";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -19,125 +20,104 @@ import {
 
 export const DashboardOverview = () => {
   const { profile } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({
-    revenue: 0,
-    ordersCount: 0,
-    bottlesSold: 0,
-    visitors: 0,
-    revenueChange: 0,
-    ordersChange: 0,
-  });
-  const [chartData, setChartData] = useState<any[]>([]);
-  const [channelData, setChannelData] = useState<any[]>([]);
-  const [recentOrders, setRecentOrders] = useState<any[]>([]);
-  const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
 
-  const fetchData = async () => {
-    if (!profile?.winery_id) return;
-    setLoading(true);
-    try {
+  const { data: dashboardData } = useQuery({
+    queryKey: ['dashboard', profile?.winery_id],
+    enabled: !!profile?.winery_id,
+    staleTime: 1000 * 60 * 5, // 5 minutos de cache
+    queryFn: async () => {
       // 1. Buscar Vendas (Orders)
       const { data: orders } = await supabase
         .from("orders")
         .select(`*, items:order_items(quantity)`)
-        .eq("winery_id", profile.winery_id)
+        .eq("winery_id", profile!.winery_id)
         .order("created_at", { ascending: false });
 
       // 2. Buscar Reservas (Bookings)
       const { data: bookings } = await supabase
         .from("bookings")
         .select(`*, event:events(title, date)`)
-        .eq("winery_id", profile.winery_id)
+        .eq("winery_id", profile!.winery_id)
         .order("created_at", { ascending: false });
 
       // 3. Buscar Próximos Eventos (Sessões)
       const { data: events } = await supabase
         .from("events")
         .select("*")
-        .eq("winery_id", profile.winery_id)
+        .eq("winery_id", profile!.winery_id)
         .gte("date", new Date().toISOString())
         .order("date", { ascending: true })
         .limit(4);
 
-      if (orders && bookings) {
-        const now = new Date();
-        const thisMonth = { start: startOfMonth(now), end: endOfMonth(now) };
-        
-        // Cálculos de KPI
-        const monthOrders = orders.filter(o => isWithinInterval(parseISO(o.created_at), thisMonth));
-        const monthRevenue = monthOrders.reduce((acc, o) => acc + (o.status === 'completed' ? Number(o.total_amount) : 0), 0);
-        const totalBottles = orders.reduce((acc, o) => acc + o.items.reduce((sum: number, i: any) => sum + i.quantity, 0), 0);
-        
-        // Corrigido: O campo correto é 'participants'
-        const totalVisitors = bookings.reduce((acc, b) => acc + Number(b.participants || 0), 0);
+      const now = new Date();
+      const thisMonth = { start: startOfMonth(now), end: endOfMonth(now) };
+      
+      const safeOrders = orders || [];
+      const safeBookings = bookings || [];
+      const safeEvents = events || [];
 
-        setStats({
-          revenue: monthRevenue,
-          ordersCount: orders.length,
-          bottlesSold: totalBottles,
-          visitors: totalVisitors,
-          revenueChange: 12.5, // Mock change for now
-          ordersChange: 5.2,
-        });
+      // Cálculos de KPI
+      const monthOrders = safeOrders.filter(o => isWithinInterval(parseISO(o.created_at), thisMonth));
+      const monthRevenue = monthOrders.reduce((acc, o) => acc + (o.status === 'completed' ? Number(o.total_amount) : 0), 0);
+      const totalBottles = safeOrders.reduce((acc, o) => acc + o.items.reduce((sum: number, i: any) => sum + i.quantity, 0), 0);
+      const totalVisitors = safeBookings.reduce((acc, b) => acc + Number(b.participants || 0), 0);
 
-        // Gráfico de Canais (Por método de pagamento)
-        const channels: Record<string, number> = {};
-        orders.forEach(o => {
-          const method = o.payment_method?.toUpperCase() || "OUTROS";
-          channels[method] = (channels[method] || 0) + 1;
-        });
-        setChannelData(Object.entries(channels).map(([canal, valor]) => ({ canal, valor })));
+      const stats = {
+        revenue: monthRevenue,
+        ordersCount: safeOrders.length,
+        bottlesSold: totalBottles,
+        visitors: totalVisitors,
+        revenueChange: 12.5, // Mock change
+        ordersChange: 5.2,
+      };
 
-        // Gráfico de Receita Mensal (Últimos 6 meses)
-        const last6Months = Array.from({ length: 6 }).map((_, i) => {
-          const d = subMonths(now, 5 - i);
-          const monthStr = format(d, "MMM", { locale: ptBR });
-          const interval = { start: startOfMonth(d), end: endOfMonth(d) };
-          const monthRev = orders
-            .filter(o => o.status === 'completed' && isWithinInterval(parseISO(o.created_at), interval))
-            .reduce((acc, o) => acc + Number(o.total_amount), 0);
-          return { mes: monthStr, receita: monthRev };
-        });
-        setChartData(last6Months);
+      // Gráfico de Canais
+      const channels: Record<string, number> = {};
+      safeOrders.forEach(o => {
+        const method = o.payment_method?.toUpperCase() || "OUTROS";
+        channels[method] = (channels[method] || 0) + 1;
+      });
+      const channelData = Object.entries(channels).map(([canal, valor]) => ({ canal, valor }));
 
-        // Pedidos Recentes
-        setRecentOrders(orders.slice(0, 5).map(o => ({
-          id: `#${o.id.substring(0, 4)}`,
-          cliente: o.customer_name,
-          valor: Number(o.total_amount).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
-          status: o.status === 'completed' ? "Pago" : o.status === 'pending' ? "Pendente" : "Cancelado"
-        })));
+      // Gráfico de Receita Mensal
+      const last6Months = Array.from({ length: 6 }).map((_, i) => {
+        const d = subMonths(now, 5 - i);
+        const monthStr = format(d, "MMM", { locale: ptBR });
+        const interval = { start: startOfMonth(d), end: endOfMonth(d) };
+        const monthRev = safeOrders
+          .filter(o => o.status === 'completed' && isWithinInterval(parseISO(o.created_at), interval))
+          .reduce((acc, o) => acc + Number(o.total_amount), 0);
+        return { mes: monthStr, receita: monthRev };
+      });
 
-        // Próximos Eventos
-        setUpcomingEvents(events?.map(e => ({
-          titulo: e.title,
-          data: format(parseISO(e.date), "dd/MM '·' HH:mm", { locale: ptBR }),
-          pessoas: e.booked_slots,
-          tipo: "Sessão"
-        })) || []);
-      }
-    } catch (err) {
-      console.error("Erro dashboard:", err);
-    } finally {
-      setLoading(false);
+      // Pedidos Recentes
+      const recentOrders = safeOrders.slice(0, 5).map(o => ({
+        id: `#${o.id.substring(0, 4)}`,
+        cliente: o.customer_name,
+        valor: Number(o.total_amount).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+        status: o.status === 'completed' ? "Pago" : o.status === 'pending' ? "Pendente" : "Cancelado"
+      }));
+
+      // Próximos Eventos
+      const upcomingEvents = safeEvents.map(e => ({
+        titulo: e.title,
+        data: format(parseISO(e.date), "dd/MM '·' HH:mm", { locale: ptBR }),
+        pessoas: e.booked_slots,
+        tipo: "Sessão"
+      }));
+
+      return { stats, channelData, last6Months, recentOrders, upcomingEvents };
     }
-  };
-
-  useEffect(() => {
-    fetchData();
-  }, [profile]);
+  });
 
   const firstName = profile?.full_name?.split(" ")[0] || "Usuário";
-
-  if (loading) {
-    return (
-      <div className="h-[80vh] flex flex-col items-center justify-center gap-4 text-muted-foreground">
-        <Loader2 className="h-10 w-10 animate-spin text-wine" />
-        <p className="font-display text-lg animate-pulse">Sintonizando dados da vinícola...</p>
-      </div>
-    );
-  }
+  
+  // Valores default para renderizar instantaneamente em 0ms
+  const stats = dashboardData?.stats || { revenue: 0, ordersCount: 0, bottlesSold: 0, visitors: 0, revenueChange: 0, ordersChange: 0 };
+  const chartData = dashboardData?.last6Months || [];
+  const channelData = dashboardData?.channelData || [];
+  const recentOrders = dashboardData?.recentOrders || [];
+  const upcomingEvents = dashboardData?.upcomingEvents || [];
 
   return (
     <div className="space-y-6">
